@@ -27,7 +27,7 @@ which device produced it.
 ## Installation (HACS)
 
 1. HACS → **⋮** → **Custom repositories**.
-2. Add `https://github.com/batareya16/ha-mi-fitness` as category **Integration**.
+2. Add `https://github.com/batareya16/MiFitnessHass` as category **Integration**.
 3. Install **Mi Fitness**, then restart Home Assistant.
 4. **Settings → Devices & Services → Add Integration → Mi Fitness**.
 
