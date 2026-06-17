@@ -1,0 +1,81 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mi Fitness \u2014 Setup",
+        "data": {
+          "auth_method": "Authentication method",
+          "region": "Server region"
+        }
+      },
+      "password": {
+        "title": "Mi Fitness \u2014 Xiaomi Login",
+        "description": "Enter your Xiaomi account credentials. If 2FA is enabled, a verification code will be sent to your email.",
+        "data": {
+          "username": "Xiaomi account email or phone",
+          "password": "Password"
+        }
+      },
+      "captcha": {
+        "title": "Mi Fitness \u2014 Captcha Required",
+        "description": "Enter the text shown in the image:\n\n![Captcha]({captcha_url})",
+        "data": {
+          "captcha_code": "Captcha text"
+        }
+      },
+      "approval": {
+        "title": "Mi Fitness \u2014 Email Verification",
+        "description": "Xiaomi sent a verification code to your email.\n\nEnter the code below \u2014 the integration will submit it automatically.",
+        "data": {
+          "email_code": "Code from email"
+        }
+      },
+      "tokens": {
+        "title": "Mi Fitness \u2014 Manual Token Entry",
+        "description": "Advanced: enter account credentials obtained from your own Mi Fitness session.\n\n\u2022 ssecurity, userId, cUserId \u2014 from the serviceLoginAuth2 response\n\u2022 passToken \u2014 from the serviceLoginAuth2 Set-Cookie header\n\u2022 serviceToken \u2014 from the STS Set-Cookie header\n\npassToken lets the integration auto-refresh tokens without 2FA. Highly recommended for 2FA accounts.\n\nRegion: {region}",
+        "data": {
+          "user_id": "userId",
+          "c_user_id": "cUserId",
+          "ssecurity": "ssecurity",
+          "service_token": "serviceToken",
+          "pass_token": "passToken (recommended)",
+          "phone_id": "Phone ID (optional)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Mi Fitness \u2014 Credentials Changed",
+        "description": "Automatic re-login failed. Your password may have changed \u2014 enter updated credentials.",
+        "data": {
+          "username": "Xiaomi account email or phone",
+          "password": "Password"
+        }
+      },
+      "reauth_captcha": {
+        "title": "Mi Fitness \u2014 Captcha",
+        "description": "Enter the text shown in the image:\n\n![Captcha]({captcha_url})",
+        "data": {
+          "captcha_code": "Captcha text"
+        }
+      },
+      "reauth_approval": {
+        "title": "Mi Fitness \u2014 Email Verification",
+        "description": "Xiaomi sent a verification code to your email.\n\nEnter the code below \u2014 the integration will submit it automatically.",
+        "data": {
+          "email_code": "Code from email"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials or expired tokens.",
+      "cannot_connect": "Cannot connect to Mi Fitness API. Check region and internet.",
+      "login_failed": "Login failed. Check your credentials and try again.",
+      "captcha_invalid": "Wrong captcha. Try again.",
+      "unknown": "Unexpected error \u2014 check Home Assistant logs.",
+      "approval_not_detected": "Wrong or expired code. Check your email and try again."
+    },
+    "abort": {
+      "already_configured": "This Mi Fitness account is already configured.",
+      "reauth_successful": "Re-authentication successful."
+    }
+  }
+}
