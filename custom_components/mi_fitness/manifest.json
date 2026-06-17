@@ -1,13 +1,13 @@
 {
   "domain": "mi_fitness",
   "name": "Mi Fitness",
-  "version": "1.0.0",
-  "documentation": "https://github.com/batareya16/ha-mi-fitness",
-  "issue_tracker": "https://github.com/batareya16/ha-mi-fitness/issues",
-  "requirements": ["pycryptodome>=3.15.0", "requests>=2.28.0"],
-  "dependencies": [],
   "codeowners": ["@batareya16"],
   "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/batareya16/ha-mi-fitness",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
-  "integration_type": "service"
+  "issue_tracker": "https://github.com/batareya16/ha-mi-fitness/issues",
+  "requirements": ["pycryptodome>=3.15.0", "requests>=2.28.0"],
+  "version": "1.0.0"
 }
