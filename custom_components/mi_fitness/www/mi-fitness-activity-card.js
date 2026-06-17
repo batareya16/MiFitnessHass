@@ -8,14 +8,26 @@ class MiFitnessActivityCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.user_id) throw new Error("mi-fitness-activity-card: user_id required");
-    this._uid      = config.user_id;
+    // user_id is optional — auto-detected from existing entities if omitted.
+    this._uid      = config.user_id ? String(config.user_id) : null;
     this._stepGoal = parseInt(config.step_goal ?? 10000);
     this._name     = config.name ?? "Daily Activity";
   }
 
+  _detectUid(hass) {
+    // Find the account id from any mi_fitness entity so users don't need to
+    // look up their Xiaomi user_id. Matches sensor.mi_fitness_<uid>_steps_today.
+    const re = /^sensor\.mi_fitness_(.+)_steps_today$/;
+    for (const eid in hass.states) {
+      const m = eid.match(re);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
   set hass(hass) {
     this._hass = hass;
+    if (!this._uid) this._uid = this._detectUid(hass);
     const selDate = this._selectedDate || this._dateStr(new Date());
     if (selDate !== this._lastDate) {
       this._buildDOM();

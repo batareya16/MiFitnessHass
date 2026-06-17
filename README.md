@@ -76,6 +76,19 @@ type: custom:mi-fitness-activity-card
 #   custom:mi-fitness-sleep-streak-card
 ```
 
+The account is detected automatically from your entities — no `user_id` needed.
+Only set it to disambiguate when you have **more than one** Mi Fitness account
+configured:
+
+```yaml
+type: custom:mi-fitness-sleep-card
+user_id: "1234567890"   # optional; the suffix in sensor.mi_fitness_<user_id>_…
+```
+
+> To find it manually: **Developer Tools → States**, filter `mi_fitness` — the
+> number in the entity id (e.g. `sensor.mi_fitness_1234567890_steps_today`) is
+> your `user_id`.
+
 > After updating the integration, hard-refresh the browser (Ctrl+Shift+R) so
 > the new card code loads.
 
