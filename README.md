@@ -69,11 +69,19 @@ The integration ships custom cards (in
 Just add them to a dashboard:
 
 ```yaml
+type: custom:mi-fitness-sleep-card
+
+type: custom:mi-fitness-sleep-streak-card
+goal_hours: 7
+goal_minutes: 30
+name: Sleep Goal
+
 type: custom:mi-fitness-activity-card
-# also available:
-#   custom:mi-fitness-activity-streak-card
-#   custom:mi-fitness-sleep-card
-#   custom:mi-fitness-sleep-streak-card
+step_goal: 6000
+
+type: custom:mi-fitness-activity-streak-card
+step_goal: 6000
+name: Step Goal
 ```
 
 The account is detected automatically from your entities — no `user_id` needed.
