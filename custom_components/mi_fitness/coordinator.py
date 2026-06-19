@@ -206,6 +206,10 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         self._sensor_data: dict[str, Any] = {}
         self._sleep_history: dict[str, dict] = {}
         self._steps_history: dict[str, dict] = {}
+        # Per-day step records keyed by timestamp: {date_str: {ts: {...}}}.
+        # The server re-sends the same interval with a new watermark as data
+        # accumulates, so we DEDUPE by ts (replace) instead of summing.
+        self._step_buckets: dict[str, dict] = {}
         self._initial_load_done: bool = False
 
     async def async_load_stored_state(self):
@@ -222,6 +226,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
             self._day_num       = stored.get("day_num", 0)
             self._sleep_history = stored.get("sleep_history", {})
             self._steps_history = stored.get("steps_history", {})
+            self._step_buckets  = stored.get("step_buckets", {})
             self._sensor_data   = stored.get("sensor_data", {})
             # On restart roll back to start-of-today so we re-fetch today's data.
             # (watermark sits at end-of-data; day_wm is start-of-today.)
@@ -317,6 +322,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                 "day_num":       self._day_num,
                 "sleep_history": self._sleep_history,
                 "steps_history": self._steps_history,
+                "step_buckets":  self._step_buckets,
                 "sensor_data":   self._sensor_data,
             })
 
@@ -354,7 +360,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         recent_cutoff = now - 14 * 86400
         slow_cutoff   = now - 90 * 86400
 
-        steps_by_date: dict[str, dict] = {}
+        touched_step_dates: set[str] = set()
         calories_today: list[dict] = []
         hr_readings: list[dict] = []
         stand_hours_today_set: set[int] = set()
@@ -373,18 +379,17 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                         "Mi Fitness STEP: date=%s h=%02d steps=%s dist=%s",
                         date_str, hour, val.get("steps"), val.get("distance"),
                     )
-                    entry = steps_by_date.setdefault(date_str, {
-                        "steps": 0, "distance": 0, "calories": 0, "hourly": {}
-                    })
-                    s = val.get("steps", 0)
-                    d = val.get("distance", 0)
-                    c = val.get("calories", 0)
-                    entry["steps"]    += s
-                    entry["distance"] += d
-                    entry["calories"] += c
-                    he = entry["hourly"].setdefault(hour, {"steps": 0, "distance": 0})
-                    he["steps"]    += s
-                    he["distance"] += d
+                    # Dedupe by timestamp: the server re-sends the same interval
+                    # with a new watermark as data accumulates. REPLACE (not add),
+                    # otherwise a day inflates by the number of re-sends.
+                    day = self._step_buckets.setdefault(date_str, {})
+                    day[str(ts)] = {
+                        "steps":    val.get("steps", 0),
+                        "distance": val.get("distance", 0),
+                        "calories": val.get("calories", 0),
+                        "hour":     hour,
+                    }
+                    touched_step_dates.add(date_str)
 
             # ── Heart rate ────────────────────────────────────────────────
             elif key == KEY_HEART_RATE:
@@ -453,29 +458,36 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                 if today <= ts < tomorrow:
                     stand_hours_today_set.add(datetime.fromtimestamp(ts).hour)
 
-        # Steps: update 14-day history, today's totals, and hourly breakdown
-        if steps_by_date:
-            today_str = datetime.fromtimestamp(today).strftime("%Y-%m-%d")
-            for date_str, data in steps_by_date.items():
-                prev = self._steps_history.get(date_str, {})
+        # Steps: rebuild day totals from deduped buckets (sum of unique-ts values)
+        if touched_step_dates:
+            # prune buckets older than 14 days
+            cutoff_str = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
+            self._step_buckets = {
+                d: b for d, b in self._step_buckets.items() if d >= cutoff_str
+            }
+            # derive per-day totals from the deduped buckets
+            self._steps_history = {}
+            for date_str, buckets in self._step_buckets.items():
                 self._steps_history[date_str] = {
                     "date":     date_str,
-                    "steps":    prev.get("steps",    0) + data["steps"],
-                    "distance": prev.get("distance", 0) + data["distance"],
-                    "calories": prev.get("calories", 0) + data["calories"],
+                    "steps":    sum(b["steps"]    for b in buckets.values()),
+                    "distance": sum(b["distance"] for b in buckets.values()),
+                    "calories": sum(b["calories"] for b in buckets.values()),
                 }
-            cutoff_str = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
-            self._steps_history = {
-                k: v for k, v in self._steps_history.items() if k >= cutoff_str
-            }
-            if today_str in steps_by_date:
-                td = steps_by_date[today_str]
-                self._sensor_data["steps_today"]         = td["steps"]
-                self._sensor_data["distance_today"]      = td["distance"]
-                self._sensor_data["step_calories_today"] = td["calories"]
-                self._sensor_data["steps_hourly"]        = [
+            today_str = datetime.fromtimestamp(today).strftime("%Y-%m-%d")
+            tb = self._step_buckets.get(today_str)
+            if tb:
+                self._sensor_data["steps_today"]         = sum(b["steps"]    for b in tb.values())
+                self._sensor_data["distance_today"]      = sum(b["distance"] for b in tb.values())
+                self._sensor_data["step_calories_today"] = sum(b["calories"] for b in tb.values())
+                hourly: dict[int, dict] = {}
+                for b in tb.values():
+                    he = hourly.setdefault(b["hour"], {"steps": 0, "distance": 0})
+                    he["steps"]    += b["steps"]
+                    he["distance"] += b["distance"]
+                self._sensor_data["steps_hourly"] = [
                     {"hour": h, "steps": v["steps"], "distance": v["distance"]}
-                    for h, v in sorted(td["hourly"].items())
+                    for h, v in sorted(hourly.items())
                 ]
             self._sensor_data["steps_history_14d"] = sorted(
                 self._steps_history.values(), key=lambda x: x["date"], reverse=True

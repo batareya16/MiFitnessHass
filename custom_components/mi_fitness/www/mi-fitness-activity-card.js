@@ -335,7 +335,8 @@ class MiFitnessActivityCard extends HTMLElement {
   }
 }
 
-customElements.define("mi-fitness-activity-card", MiFitnessActivityCard);
+if (!customElements.get("mi-fitness-activity-card"))
+  customElements.define("mi-fitness-activity-card", MiFitnessActivityCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "mi-fitness-activity-card",

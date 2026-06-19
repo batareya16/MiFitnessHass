@@ -298,7 +298,8 @@ class MiFitnessSleepStreakCard extends HTMLElement {
   }
 }
 
-customElements.define("mi-fitness-sleep-streak-card", MiFitnessSleepStreakCard);
+if (!customElements.get("mi-fitness-sleep-streak-card"))
+  customElements.define("mi-fitness-sleep-streak-card", MiFitnessSleepStreakCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "mi-fitness-sleep-streak-card",

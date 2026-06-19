@@ -345,4 +345,5 @@ class MiFitnessSleepCard extends HTMLElement {
   }
 }
 
-customElements.define("mi-fitness-sleep-card", MiFitnessSleepCard);
+if (!customElements.get("mi-fitness-sleep-card"))
+  customElements.define("mi-fitness-sleep-card", MiFitnessSleepCard);
