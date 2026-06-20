@@ -211,6 +211,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         # accumulates, so we DEDUPE by ts (replace) instead of summing.
         self._step_buckets: dict[str, dict] = {}
         self._initial_load_done: bool = False
+        self._fetch_errors: int = 0   # consecutive failed polls → backoff
 
     async def async_load_stored_state(self):
         """Load persisted state. Called once before the first refresh.
@@ -267,7 +268,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         self._initial_load_done = True
 
         try:
-            items, new_wm = await self.hass.async_add_executor_job(
+            items, new_wm, errored = await self.hass.async_add_executor_job(
                 self._client.fetch_all_since,
                 self._watermark,
                 max_pages,
@@ -326,25 +327,41 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                 "sensor_data":   self._sensor_data,
             })
 
-        # Dynamic interval: catching up → 30 s, up to date → 15 min
+        # Dynamic interval: catching up → 30 s, up to date → 15 min,
+        # repeated failures → exponential backoff (don't hammer a rate-limit).
         if items:
             self._merge_items(items)
+            self._fetch_errors = 0
             latest_ts = max(
                 (item.get("time") or item.get("update_time") or 0) for item in items
             )
             catching_up = latest_ts < (time.time() - 2 * 86400)
+            self.update_interval = timedelta(seconds=30) if catching_up else SCAN_INTERVAL
+            if catching_up:
+                _LOGGER.debug(
+                    "Mi Fitness: catching up — latest_item=%s",
+                    datetime.fromtimestamp(latest_ts).strftime("%Y-%m-%d"),
+                )
+        elif errored:
+            # No data AND a page failed → likely rate-limit / outage. Back off
+            # exponentially (60s, 120s, … capped at 10 min) but keep retrying.
+            # Crucially, do NOT mistake this for "caught up" and never stall.
+            self._fetch_errors += 1
+            backoff = min(30 * (2 ** self._fetch_errors), 600)
+            self.update_interval = timedelta(seconds=backoff)
+            _LOGGER.warning(
+                "Mi Fitness: fetch failed x%d — backing off to %ds",
+                self._fetch_errors, backoff,
+            )
         else:
-            # No new items → fully caught up
-            catching_up = False
-            latest_ts = 0
-
-        if catching_up:
-            self.update_interval = timedelta(seconds=30)
-            _LOGGER.debug("Mi Fitness: catching up — latest_item=%s", datetime.fromtimestamp(latest_ts).strftime("%Y-%m-%d") if latest_ts else "—")
-        else:
+            # Genuinely caught up (no items, no error).
+            self._fetch_errors = 0
             if self.update_interval != SCAN_INTERVAL:
                 self.update_interval = SCAN_INTERVAL
-                _LOGGER.debug("Mi Fitness: caught up, switching to %s min interval", SCAN_INTERVAL_MINUTES)
+                _LOGGER.debug(
+                    "Mi Fitness: caught up, switching to %s min interval",
+                    SCAN_INTERVAL_MINUTES,
+                )
         return dict(self._sensor_data)
 
     def _merge_items(self, items: list[dict]) -> None:

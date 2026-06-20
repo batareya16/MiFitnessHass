@@ -218,25 +218,41 @@ class MiFitnessClient:
         r = result.get("result") or {}
         return r.get("data_list", [])
 
-    def fetch_all_since(self, watermark: int, max_pages: int = 10) -> tuple[list[dict], int]:
+    def fetch_all_since(
+        self, watermark: int, max_pages: int = 10
+    ) -> tuple[list[dict], int, bool]:
         """
         Paginate through get_fitness_data_by_watermark.
-        Returns (all_items, new_watermark).
+        Returns (all_items, new_watermark, errored).
+
+        `errored` is True if a page failed after retries — the caller must NOT
+        treat the (possibly empty) result as "fully caught up", otherwise a
+        transient network blip silently stalls polling until a reload.
         """
-        items = []
+        items: list[dict] = []
         wm = watermark
+        errored = False
         for _ in range(max_pages):
-            try:
-                r = self.get_health_data(watermark=wm)
-            except MiFitnessAuthError:
-                raise   # let coordinator handle 401 → silent refresh
-            except MiFitnessApiError as exc:
-                _LOGGER.error("fetch_all_since error: %s", exc)
+            page = None
+            for attempt in range(3):
+                try:
+                    page = self.get_health_data(watermark=wm)
+                    break
+                except MiFitnessAuthError:
+                    raise   # let coordinator handle 401 → silent refresh
+                except MiFitnessApiError as exc:
+                    _LOGGER.warning(
+                        "fetch_all_since page error (attempt %d/3): %s", attempt + 1, exc
+                    )
+                    time.sleep(1.5 * (attempt + 1))
+            if page is None:
+                errored = True
                 break
-            dl = r.get("data_list") or []
-            new_wm = r.get("watermark", wm)
+            dl = page.get("data_list") or []
+            new_wm = page.get("watermark", wm)
             items.extend(dl)
             wm = new_wm
-            if not r.get("has_more") or not dl:
+            if not page.get("has_more") or not dl:
                 break
-        return items, wm
+            time.sleep(0.3)   # be gentle: avoid hammering / rate-limit during catch-up
+        return items, wm, errored

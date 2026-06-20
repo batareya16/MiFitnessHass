@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.loader import async_get_integration
 
 from .api import MiFitnessApiError, MiFitnessClient
 from .const import (
@@ -46,16 +47,20 @@ async def _async_register_cards(hass: HomeAssistant) -> None:
     if hass.data.get(flag):
         return
 
+    # Version query string busts the browser cache on every release —
+    # without it, updated card code is never picked up.
+    integration = await async_get_integration(hass, DOMAIN)
+    ver = str(integration.version or "0")
+
     www_dir = Path(__file__).parent / "www"
     await hass.http.async_register_static_paths(
         [StaticPathConfig(_CARDS_URL_BASE, str(www_dir), False)]
     )
     for card in _CARDS:
-        # cache-bust on version bump so browsers pick up new card code
-        add_extra_js_url(hass, f"{_CARDS_URL_BASE}/{card}")
+        add_extra_js_url(hass, f"{_CARDS_URL_BASE}/{card}?v={ver}")
 
     hass.data[flag] = True
-    _LOGGER.debug("Mi Fitness: registered %d Lovelace cards", len(_CARDS))
+    _LOGGER.debug("Mi Fitness: registered %d Lovelace cards (v%s)", len(_CARDS), ver)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
