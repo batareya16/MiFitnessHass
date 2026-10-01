@@ -24,10 +24,10 @@
         }
       },
       "approval": {
-        "title": "Mi Fitness \u2014 Email Verification",
-        "description": "Xiaomi sent a verification code to your email.\n\nEnter the code below \u2014 the integration will submit it automatically.",
+        "title": "Mi Fitness \u2014 SMS Verification",
+        "description": "Xiaomi sent a verification code to your phone via SMS.\n\nEnter the code below \u2014 the integration will submit it automatically.",
         "data": {
-          "email_code": "Code from email"
+          "sms_code": "Code from SMS"
         }
       },
       "tokens": {
@@ -58,10 +58,10 @@
         }
       },
       "reauth_approval": {
-        "title": "Mi Fitness \u2014 Email Verification",
-        "description": "Xiaomi sent a verification code to your email.\n\nEnter the code below \u2014 the integration will submit it automatically.",
+        "title": "Mi Fitness \u2014 SMS Verification",
+        "description": "Xiaomi sent a verification code to your phone via SMS.\n\nEnter the code below \u2014 the integration will submit it automatically.",
         "data": {
-          "email_code": "Code from email"
+          "sms_code": "Code from SMS"
         }
       }
     },
@@ -71,7 +71,8 @@
       "login_failed": "Login failed. Check your credentials and try again.",
       "captcha_invalid": "Wrong captcha. Try again.",
       "unknown": "Unexpected error \u2014 check Home Assistant logs.",
-      "approval_not_detected": "Wrong or expired code. Check your email and try again."
+      "approval_not_detected": "Wrong or expired code. Try again.",
+      "sms_send_failed": "Could not send the SMS code (rate limit or network error). Wait a minute and try again."
     },
     "abort": {
       "already_configured": "This Mi Fitness account is already configured.",
