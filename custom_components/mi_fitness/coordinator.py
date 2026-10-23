@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    statistics_during_period,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -36,9 +42,21 @@ from .const import (
     STORAGE_VERSION,
 )
 
+try:
+    from homeassistant.components.recorder.models import StatisticMeanType
+except ImportError:  # HA < 2025.4 — metadata uses has_mean instead
+    StatisticMeanType = None
+
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=SCAN_INTERVAL_MINUTES)
+
+# Readings written to hourly long-term statistics mi_fitness:<metric>_<user_id>
+# as mean/min/max: metric → (name, unit)
+_STATISTICS = {
+    "heart_rate": ("Heart Rate", "bpm"),
+    "spo2":       ("Blood Oxygen (SpO2)", "%"),
+}
 
 # Sleep stage state codes from the API
 _SLEEP_STATE_NAMES = {2: "light", 3: "deep", 4: "rem", 5: "awake"}
@@ -210,6 +228,12 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         # The server re-sends the same interval with a new watermark as data
         # accumulates, so we DEDUPE by ts (replace) instead of summing.
         self._step_buckets: dict[str, dict] = {}
+        # Readings per metric and UTC hour: {metric: {hour_start_ts: {ts: value}}},
+        # deduped by ts like steps. Feeds the hourly statistics (and today's
+        # heart rate avg/min/max).
+        self._stat_buckets: dict[str, dict] = {}
+        # Days whose step statistics must be rewritten after the next merge
+        self._pending_step_dates: set[str] = set()
         self._initial_load_done: bool = False
         self._fetch_errors: int = 0   # consecutive failed polls → backoff
 
@@ -228,6 +252,10 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
             self._sleep_history = stored.get("sleep_history", {})
             self._steps_history = stored.get("steps_history", {})
             self._step_buckets  = stored.get("step_buckets", {})
+            # (re)write step statistics for all stored days on startup — also
+            # backfills installs that had step data before statistics existed
+            self._pending_step_dates = set(self._step_buckets)
+            self._stat_buckets  = stored.get("stat_buckets", {})
             self._sensor_data   = stored.get("sensor_data", {})
             # On restart roll back to start-of-today so we re-fetch today's data.
             # (watermark sits at end-of-data; day_wm is start-of-today.)
@@ -324,6 +352,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                 "sleep_history": self._sleep_history,
                 "steps_history": self._steps_history,
                 "step_buckets":  self._step_buckets,
+                "stat_buckets":  self._stat_buckets,
                 "sensor_data":   self._sensor_data,
             })
 
@@ -331,6 +360,8 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         # repeated failures → exponential backoff (don't hammer a rate-limit).
         if items:
             self._merge_items(items)
+            if self._pending_step_dates:
+                await self._import_step_statistics()
             self._fetch_errors = 0
             latest_ts = max(
                 (item.get("time") or item.get("update_time") or 0) for item in items
@@ -379,7 +410,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
 
         touched_step_dates: set[str] = set()
         calories_today: list[dict] = []
-        hr_readings: list[dict] = []
+        touched_hours: dict[str, set[str]] = {}
         stand_hours_today_set: set[int] = set()
 
         for item in items:
@@ -417,8 +448,8 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                     self._sensor_data["heart_rate"]      = val["bpm"]
                     self._sensor_data["heart_rate_ts"]   = ts
                     self._sensor_data["heart_rate_type"] = val.get("type", 0)
-                if today <= ts < tomorrow:
-                    hr_readings.append(val)
+                if isinstance(val, dict) and val.get("bpm"):
+                    self._add_reading("heart_rate", ts, val["bpm"], touched_hours)
 
             # ── Resting heart rate ────────────────────────────────────────
             elif key == KEY_RESTING_HEART_RATE:
@@ -458,6 +489,8 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                     if spo2_val:
                         self._sensor_data["spo2"]    = spo2_val
                         self._sensor_data["spo2_ts"] = ts
+                if ts >= recent_cutoff and isinstance(val, dict) and val.get("spo2"):
+                    self._add_reading("spo2", ts, val["spo2"], touched_hours)
 
             # ── Vitality ──────────────────────────────────────────────────
             elif key == KEY_VITALITY:
@@ -477,6 +510,7 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
 
         # Steps: rebuild day totals from deduped buckets (sum of unique-ts values)
         if touched_step_dates:
+            self._pending_step_dates |= touched_step_dates
             # prune buckets older than 14 days
             cutoff_str = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
             self._step_buckets = {
@@ -515,8 +549,20 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                 v.get("calories", 0) for v in calories_today if isinstance(v, dict)
             )
 
-        if hr_readings:
-            bpms = [v["bpm"] for v in hr_readings if isinstance(v, dict) and v.get("bpm")]
+        for metric, hours in touched_hours.items():
+            self._import_statistics(metric, hours)
+            # keep 2 days: enough for today's values and late re-sends
+            self._stat_buckets[metric] = {
+                h: b for h, b in self._stat_buckets[metric].items() if int(h) >= today - 86400
+            }
+
+        if "heart_rate" in touched_hours:
+            bpms = [
+                bpm
+                for h, b in self._stat_buckets["heart_rate"].items()
+                if today <= int(h) < tomorrow
+                for bpm in b.values()
+            ]
             if bpms:
                 self._sensor_data["heart_rate_avg_today"] = round(sum(bpms) / len(bpms))
                 self._sensor_data["heart_rate_max_today"] = max(bpms)
@@ -533,6 +579,94 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         self._sensor_data["sleep_history_14d"] = history_list
         if history_list:
             self._sensor_data["sleep_chronotype"] = _sleep_chronotype_6(history_list)
+
+    def _add_reading(
+        self, metric: str, ts: int, value: float, touched: dict[str, set[str]]
+    ) -> None:
+        """Store a reading in its hour bucket (replacing re-sends of the same ts)."""
+        hour = str(ts - ts % 3600)
+        self._stat_buckets.setdefault(metric, {}).setdefault(hour, {})[str(ts)] = value
+        touched.setdefault(metric, set()).add(hour)
+
+    def _import_statistics(self, metric: str, hours: set[str]) -> None:
+        """Write hourly mean/min/max of a metric as external long-term statistics.
+
+        The sensors only show the latest reading per poll; this keeps every
+        reading the band synced, so graphs show the full curve.
+        """
+        name, unit = _STATISTICS[metric]
+        metadata = self._statistic_metadata(metric, name, unit, has_sum=False)
+        statistics: list[StatisticData] = []
+        for hour in sorted(hours, key=int):
+            values = list(self._stat_buckets[metric][hour].values())
+            statistics.append(StatisticData(
+                start=datetime.fromtimestamp(int(hour), tz=timezone.utc),
+                mean=sum(values) / len(values),
+                min=min(values),
+                max=max(values),
+            ))
+        async_add_external_statistics(self.hass, metadata, statistics)
+
+    async def _import_step_statistics(self) -> None:
+        """Write hourly steps as the cumulative statistic mi_fitness:steps_<user_id>.
+
+        Graphs show daily steps with stat type "change". Unlike the
+        steps_today sensor, this is not skewed by the partial re-fetch after
+        a restart, and it covers the days fetched before the sensor existed.
+        Rewrites everything from the earliest touched day on, continuing
+        the sum from the last row before it.
+        """
+        first_day = min(self._pending_step_dates)
+        self._pending_step_dates = set()
+        hours: dict[int, int] = {}
+        for date_str, buckets in self._step_buckets.items():
+            if date_str < first_day:
+                continue
+            for ts, b in buckets.items():
+                hour = int(ts) - int(ts) % 3600
+                hours[hour] = hours.get(hour, 0) + b["steps"]
+        if not hours:
+            return
+
+        metadata = self._statistic_metadata("steps", "Steps", "steps", has_sum=True)
+        start = datetime.fromtimestamp(min(hours), tz=timezone.utc)
+        before = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass, start - timedelta(days=30), start,
+            {metadata["statistic_id"]}, "hour", None, {"sum"},
+        )
+        rows = before.get(metadata["statistic_id"])
+        total = (rows[-1].get("sum") or 0) if rows else 0
+
+        statistics: list[StatisticData] = []
+        for hour in sorted(hours):
+            total += hours[hour]
+            statistics.append(StatisticData(
+                start=datetime.fromtimestamp(hour, tz=timezone.utc),
+                state=hours[hour],
+                sum=total,
+            ))
+        async_add_external_statistics(self.hass, metadata, statistics)
+
+    def _statistic_metadata(
+        self, metric: str, name: str, unit: str, has_sum: bool
+    ) -> StatisticMetaData:
+        user_id = self._entry.data.get(CONF_USER_ID, "")
+        metadata: StatisticMetaData = {
+            "has_sum":             has_sum,
+            "name":                f"Mi Fitness ({user_id}) {name}",
+            "source":              DOMAIN,
+            "statistic_id":        f"{DOMAIN}:{metric}_{user_id}",
+            "unit_of_measurement": unit,
+        }
+        if StatisticMeanType is not None:
+            metadata["mean_type"] = (
+                StatisticMeanType.NONE if has_sum else StatisticMeanType.ARITHMETIC
+            )
+            metadata["unit_class"] = None
+        else:
+            metadata["has_mean"] = not has_sum
+        return metadata
 
     # ── Sleep processing ──────────────────────────────────────────────────────
 

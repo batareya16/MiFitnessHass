@@ -18,6 +18,8 @@ which device produced it.
 
 - Sensors: steps, distance, calories, heart rate (avg/max/min/resting), sleep
   (duration, stages, quality, chronotype), vitality, stand hours, SpO₂, weight.
+- Long-term statistics from every synced reading: hourly heart rate and SpO₂
+  (mean/min/max) and steps — see [History statistics](#history-statistics).
 - Silent token refresh using `passToken` — survives `serviceToken` expiry
   without re-doing 2FA.
 - Custom Lovelace cards for activity and sleep (in [`www/`](www/)).
@@ -99,6 +101,42 @@ user_id: "1234567890"   # optional; the suffix in sensor.mi_fitness_<user_id>_�
 
 > After updating the integration, hard-refresh the browser (Ctrl+Shift+R) so
 > the new card code loads.
+
+---
+
+## History statistics
+
+The heart rate and SpO₂ sensors show the latest reading at each poll, so their
+history has only a few points. The band syncs a reading every few minutes,
+and the integration writes all of them as hourly mean/min/max to the long-term
+statistics `mi_fitness:heart_rate_<user_id>` and `mi_fitness:spo2_<user_id>` —
+including readings that arrive late, e.g. after the phone has not synced for a
+while.
+
+Steps go to `mi_fitness:steps_<user_id>` as an hourly cumulative sum. Use stat
+type `change` for steps per day; the history fetched on first install (up to
+14 days) shows up right away.
+
+```yaml
+type: statistics-graph
+title: Heart rate – last 24 h
+entities:
+  - mi_fitness:heart_rate_1234567890
+period: hour
+days_to_show: 1
+stat_types: [mean, min, max]
+```
+
+```yaml
+type: statistics-graph
+title: Steps per day
+entities:
+  - mi_fitness:steps_1234567890
+period: day
+days_to_show: 14
+chart_type: bar
+stat_types: [change]
+```
 
 ---
 

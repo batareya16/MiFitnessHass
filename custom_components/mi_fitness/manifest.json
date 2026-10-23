@@ -3,7 +3,7 @@
   "name": "Mi Fitness",
   "codeowners": ["@batareya16"],
   "config_flow": true,
-  "dependencies": ["frontend", "http"],
+  "dependencies": ["frontend", "http", "recorder"],
   "documentation": "https://github.com/batareya16/MiFitnessHass",
   "integration_type": "service",
   "iot_class": "cloud_polling",
