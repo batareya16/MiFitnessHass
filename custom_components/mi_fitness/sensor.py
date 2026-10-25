@@ -155,6 +155,13 @@ SENSOR_TYPES: tuple[MiFitnessSensorDescription, ...] = (
         icon="mdi:water-percent",
     ),
     MiFitnessSensorDescription(
+        key="stress",
+        name="Stress",
+        data_key="stress",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:head-heart-outline",
+    ),
+    MiFitnessSensorDescription(
         key="stand_hours_today",
         name="Stand Hours Today",
         data_key="stand_hours_today",
@@ -365,6 +372,11 @@ class MiFitnessSensor(CoordinatorEntity[MiFitnessCoordinator], SensorEntity):
             hours_list = data.get("stand_hours_list")
             if hours_list:
                 attrs["hours_list"] = hours_list
+
+        elif key == "stress":
+            ts = data.get("stress_ts")
+            if ts:
+                attrs["last_measured"] = datetime.fromtimestamp(ts).isoformat()
 
         elif key == "weight":
             ts = data.get("weight_ts")

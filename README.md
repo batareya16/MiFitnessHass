@@ -17,7 +17,8 @@ which device produced it.
 ## Features
 
 - Sensors: steps, distance, calories, heart rate (avg/max/min/resting), sleep
-  (duration, stages, quality, chronotype), vitality, stand hours, SpO₂, weight.
+  (duration, stages, quality, chronotype), vitality, stand hours, SpO₂, stress,
+  weight.
 - Silent token refresh using `passToken` — survives `serviceToken` expiry
   without re-doing 2FA.
 - Custom Lovelace cards for activity and sleep (in [`www/`](www/)).

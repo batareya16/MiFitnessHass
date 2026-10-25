@@ -42,6 +42,7 @@ KEY_WEIGHT             = "weight"
 KEY_VITALITY           = "vitality"
 KEY_VALID_STAND        = "valid_stand"
 KEY_SPO2               = "spo2"
+KEY_STRESS             = "stress"
 
 # Device info
 DEVICE_MANUFACTURER = "Xiaomi"
