@@ -310,23 +310,6 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         except MiFitnessApiError as exc:
             raise UpdateFailed(str(exc)) from exc
 
-        if new_wm and new_wm != self._watermark:
-            self._watermark = new_wm
-            today = _local_day_num()
-            if today != self._day_num:
-                # New day — snapshot watermark so restart can roll back to here
-                self._day_wm  = new_wm
-                self._day_num = today
-            await self._store.async_save({
-                "watermark":     new_wm,
-                "day_wm":        self._day_wm,
-                "day_num":       self._day_num,
-                "sleep_history": self._sleep_history,
-                "steps_history": self._steps_history,
-                "step_buckets":  self._step_buckets,
-                "sensor_data":   self._sensor_data,
-            })
-
         # Dynamic interval: catching up → 30 s, up to date → 15 min,
         # repeated failures → exponential backoff (don't hammer a rate-limit).
         if items:
@@ -362,6 +345,27 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
                     "Mi Fitness: caught up, switching to %s min interval",
                     SCAN_INTERVAL_MINUTES,
                 )
+
+        # Persist only after merging, so the stored state matches the stored
+        # watermark. Saving before the merge kept the previous poll's state,
+        # and a restart then lost what this poll had merged.
+        if new_wm and new_wm != self._watermark:
+            self._watermark = new_wm
+            today = _local_day_num()
+            if today != self._day_num:
+                # New day — snapshot watermark so restart can roll back to here
+                self._day_wm  = new_wm
+                self._day_num = today
+            await self._store.async_save({
+                "watermark":     new_wm,
+                "day_wm":        self._day_wm,
+                "day_num":       self._day_num,
+                "sleep_history": self._sleep_history,
+                "steps_history": self._steps_history,
+                "step_buckets":  self._step_buckets,
+                "sensor_data":   self._sensor_data,
+            })
+
         return dict(self._sensor_data)
 
     def _merge_items(self, items: list[dict]) -> None:
