@@ -544,12 +544,20 @@ class MiFitnessCoordinator(DataUpdateCoordinator):
         if not bedtime:
             return
 
-        # Only update current sleep record if this is newer
-        prev_bedtime = self._sensor_data.get("sleep_bedtime", 0)
-        if bedtime <= prev_bedtime:
-            return
-
         wakeup      = val.get("wake_up_time", 0)
+
+        # Only update current sleep record if this is newer. The server keeps
+        # extending a night after interruptions: it deletes the old record and
+        # re-sends it with the SAME bedtime and a later wakeup, so compare both.
+        prev_bedtime = self._sensor_data.get("sleep_bedtime", 0)
+        prev_wakeup  = self._sensor_data.get("sleep_wakeup", 0)
+        if bedtime <= prev_bedtime and wakeup <= prev_wakeup:
+            return
+        # A merged record may start on an earlier date than the one it replaces
+        if prev_bedtime and bedtime < prev_wakeup:
+            prev_date = datetime.fromtimestamp(prev_bedtime).strftime("%Y-%m-%d")
+            self._sleep_history.pop(prev_date, None)
+
         duration    = val.get("duration", 0)
         deep        = val.get("sleep_deep_duration", 0)
         light       = val.get("sleep_light_duration", 0)
